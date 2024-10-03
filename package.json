@@ -1,0 +1,29 @@
+{
+  "name": "outlook-integration-poc",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node app.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.0.0",
+    "ejs": "^3.1.10",
+    "express": "^4.21.0",
+    "express-session" : "1.18.0",
+    "@azure/msal-node": "^1.0.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "isomorphic-fetch": "^3.0.0",
+    "passport": "^0.7.0",
+    "body-parser" : "^1.20.3",
+    "passport-azure-ad": "^4.3.5"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
