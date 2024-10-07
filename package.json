@@ -21,7 +21,8 @@
     "isomorphic-fetch": "^3.0.0",
     "passport": "^0.7.0",
     "body-parser" : "^1.20.3",
-    "passport-azure-ad": "^4.3.5"
+    "passport-azure-ad": "^4.3.5",
+    "mailparser" : "^3.7.1"
   },
   "engines": {
     "node": "18.x"

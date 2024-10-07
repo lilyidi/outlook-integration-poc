@@ -3,6 +3,8 @@ const session = require('express-session');
 const axios = require('axios');
 const bodyParser = require('body-parser');
 const { Client } = require('@microsoft/microsoft-graph-client');
+const fs = require('fs');
+const path = require('path');
 require('isomorphic-fetch'); 
 require('dotenv').config();
 const { ConfidentialClientApplication } = require('@azure/msal-node');
@@ -104,6 +106,7 @@ app.get('/auth/callback', (req, res) => {
     }
     console.log(`Response is ${JSON.stringify(response)}`);
     req.session.accessToken = response.accessToken;
+    req.session.username = response.account.username;
     createSubscription(response.accessToken, response.account.homeAccountId, response.account.username);
     res.redirect('/emails');
   }).catch((error) => {
@@ -132,11 +135,17 @@ app.get('/emails', async (req, res) => {
   const client = getAuthenticatedClient(req.session.accessToken);
   try {
     let messages = [];
-    let nextPageUrl = `/me/messages`;
+    const queryOptions = {
+      '$select': 'id,subject,body,bodyPreview,conversationId,conversationIndex,internetMessageHeaders',
+      '$expand': 'attachments',
+      '$top': 25 // Limit the number of messages to fetch
+    };
+    let nextPageUrl = `/me/messages?${new URLSearchParams(queryOptions).toString()}`;
     while (nextPageUrl) {
       const response = await client.api(nextPageUrl).get();
       messages = messages.concat(response.value);
-      nextPageUrl = response['@odata.nextLink'];
+      // nextPageUrl = response['@odata.nextLink'];
+      nextPageUrl = false;
     }
     res.render('emails', { emails: messages });
   } catch (error) {
