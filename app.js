@@ -78,6 +78,53 @@ app.use(session({
 
 app.set('view engine', 'ejs');
 
+//TODO need to validate this
+app.get('/refresh-token', (req, res) => {
+  if (!req.session.refreshToken) {
+    return res.redirect('/login');
+  }
+
+  const refreshToken = req.session.refreshToken;
+  const tokenRequest = {
+    refreshToken: refreshToken,
+    clientId: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    redirectUri: `${redirectHost}/auth/callback`,
+    scopes: ["user.read", "mail.readwrite", "mail.send", "mail.read", "offlince_access"],
+  };
+
+  const tokenEndpoint = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
+
+  const params = new URLSearchParams();
+  params.append('client_id', tokenRequest.clientId);
+  params.append('client_secret', tokenRequest.clientSecret);  // Required for backend apps
+  params.append('grant_type', 'refresh_token');
+  params.append('refresh_token', tokenRequest.refreshToken);  // The refresh token
+  params.append('redirect_uri', tokenRequest.redirectUri);
+  params.append('scope', tokenRequest.scopes.join(" "));  // Space-separated list of scopes
+
+  axios.post(tokenEndpoint, params, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    }
+  }).then((response) => {
+    // Save the new access token in session (or wherever needed)
+    req.session.accessToken = response.data.access_token;
+    console.log('Access token refreshed:', response.data.access_token);
+  }).catch((error) => {
+    console.error('Error refreshing access token:', error.response.data);
+    return res.redirect('/login');
+  });
+  const authCodeUrlParameters = {
+    scopes: ["user.read", "mail.readwrite", "mail.send", "mail.read"],
+    redirectUri: `${redirectHost}/auth/callback`,
+  };
+
+  msalClient.getAuthCodeUrl(authCodeUrlParameters).then((response) => {
+    res.redirect(response);
+  }).catch((error) => console.log(JSON.stringify(error)));
+});
+
 // Login Route
 app.get('/login', (req, res) => {
   const authCodeUrlParameters = {
@@ -93,28 +140,37 @@ app.get('/login', (req, res) => {
 // Auth callback route
 app.get('/auth/callback', (req, res) => {
   const tokenRequest = {
-    code: req.query.code,
-    scopes: ["user.read", "mail.readwrite"],
-    redirectUri: `${redirectHost}/auth/callback`,
+    code: req.query.code,  // Authorization code received from /authorize
+    clientId: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    redirectUri: `${redirectHost}/auth/callback`,  // Must match the one registered in Azure
+    scopes: ["user.read", "mail.readwrite", "offline_access"],  // Requested scopes
   };
 
+  const tokenEndpoint = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
 
+  const params = new URLSearchParams();
+  params.append('client_id', tokenRequest.clientId);
+  params.append('client_secret', tokenRequest.clientSecret);  // Required for backend apps
+  params.append('grant_type', 'authorization_code');
+  params.append('code', tokenRequest.code);  // The authorization code
+  params.append('redirect_uri', tokenRequest.redirectUri);
+  params.append('scope', tokenRequest.scopes.join(" "));  // Space-separated list of scopes
 
-  msalClient.acquireTokenByCode(tokenRequest).then((response) => {
-    if (response.account) {
-      console.log('User ID:', response.account.homeAccountId);
+  axios.post(tokenEndpoint, params, {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
     }
-    console.log(`Response is ${JSON.stringify(response)}`);
-    req.session.accessToken = response.accessToken;
-    req.session.username = response.account.username;
-    createSubscription(response.accessToken, response.account.homeAccountId, response.account.username);
+  }).then((response) => {
+    // Save the tokens in session (or wherever needed)
+    req.session.accessToken = response.data.access_token;
+    req.session.refreshToken = response.data.refresh_token;
     res.redirect('/emails');
   }).catch((error) => {
-    console.log(error);
-    res.status(500).send(error);
+    console.log('Error during token exchange:', error.response.data);
+    res.status(500).send(error.response.data);
   });
 });
-
 app.post('/webhook', (req, res) => {
   if (req.query.validationToken) {
     res.send(req.query.validationToken);  // Respond with the validation token
