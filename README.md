@@ -86,3 +86,7 @@ This application supports webhook notifications for email events. To set up a we
 
 Notifications will be sent to your specified `notificationUrl` when there are changes to your emails; you should be able to see in the console.
 
+## Subscriber Functionality
+
+The subscriber in this project is setup to read from a `EventHub` setup within Microsoft Azure; In order to setup Graph updates to be automatically published to EventHub, follow the documentation provided by Microsoft in [here](https://learn.microsoft.com/en-us/graph/change-notifications-delivery-event-hubs?tabs=change-notifications-eventhubs-azure-portal-rbac%2Cchange-notifications-eventhubs-rbac%2Chttp#set-up-the-azure-event-hubs-authentication). Once this is setup, you can grab the connection string from the corresponding EventHubNamespace to be able to test out this subscriber. This subscriber is expected to be setup as a standalone processor or a separate cron job.
+

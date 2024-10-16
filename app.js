@@ -8,62 +8,39 @@ const path = require('path');
 require('isomorphic-fetch');
 require('dotenv').config();
 const { ConfidentialClientApplication } = require('@azure/msal-node');
+const {getAccessTokenForRefreshToken, msalConfig, redirect_Host, getAuthenticatedClient} = require('./auth.utils.js');
 
 const app = express();
 app.use(bodyParser.json());
 const port = 3000;
 
-// Microsoft App Credentials
-const config = {
-  auth: {
-    clientId: process.env.CLIENT_ID,
-    authority: 'https://login.microsoftonline.com/common',
-    clientSecret: process.env.CLIENT_SECRET,
-  },
-  system: {
-    loggerOptions: {
-      loggerCallback(loglevel, message) {
-        console.log(message);
-      },
-      piiLoggingEnabled: false,
-      logLevel: "Info",
-    },
-  },
-};
-
-
-function getAuthenticatedClient(accessToken) {
-  return Client.init({
-    authProvider: (done) => {
-      done(null, accessToken); // Pass the access token
-    },
-  });
-}
-
-
-const redirectHost = process.env.REDIRECT_HOST
-
+const config = msalConfig;
+const redirectHost = redirect_Host
 const msalClient = new ConfidentialClientApplication(config);
 
-const createSubscription = async (accessToken, homeAccountId, username) => {
-  // const accessToken = 'YOUR_ACCESS_TOKEN';  // Get the access token using OAuth flow
-  const subscriptionData = {
-    "changeType": "created,updated",
-    "notificationUrl": `${redirectHost}/webhook`,
-    "resource": "me/messages",
-    "expirationDateTime": new Date(Date.now() + 30000).toISOString(),  // 5 minutes from now
-    "clientState": `${username}`
-  };
-
-  try {
-    const response = await axios.post('https://graph.microsoft.com/v1.0/subscriptions', subscriptionData, {
-      headers: {
+const createSubscription = async (req) => {
+  const accessToken = req.session.accessToken;
+  const userInfoResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+    headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    console.log('Subscription created:', response.data);
+    }
+  });
+  const emailAddress = userInfoResponse.data.mail || userInfoResponse.data.userPrincipalName; // Use mail if available, otherwise userPrincipalName
+  const domainname = `${process.env.DOMAIN_NAME}`;
+  const eventhubnamespace = `${process.env.EVENTHUB_NAMESPACE}`;
+  const eventhubname = `${process.env.EVENTHUB_NAME}`;
+  try {
+    const client = getAuthenticatedClient(accessToken);
+    const subscription = {
+      changeType: "created,updated",
+      notificationUrl: `EventHub:https://${eventhubnamespace}.servicebus.windows.net/eventhubname/${eventhubname}?tenantId=${domainname}`,
+      resource: "me/messages",
+      expirationDateTime: new Date(Date.now() + 4230 * 60 * 1000).toISOString(), // 3 days from now.
+      clientState: `${emailAddress}`
+    };
+    const response = await client.api('/subscriptions')
+      .post(subscription);
+    console.log('Subscription created:', response);
   } catch (error) {
     console.error('Error creating subscription:', error.response.data);
   }
@@ -78,53 +55,6 @@ app.use(session({
 
 app.set('view engine', 'ejs');
 
-//TODO need to validate this
-app.get('/refresh-token', (req, res) => {
-  if (!req.session.refreshToken) {
-    return res.redirect('/login');
-  }
-
-  const refreshToken = req.session.refreshToken;
-  const tokenRequest = {
-    refreshToken: refreshToken,
-    clientId: process.env.CLIENT_ID,
-    clientSecret: process.env.CLIENT_SECRET,
-    redirectUri: `${redirectHost}/auth/callback`,
-    scopes: ["user.read", "mail.readwrite", "mail.send", "mail.read", "offlince_access"],
-  };
-
-  const tokenEndpoint = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
-
-  const params = new URLSearchParams();
-  params.append('client_id', tokenRequest.clientId);
-  params.append('client_secret', tokenRequest.clientSecret);  // Required for backend apps
-  params.append('grant_type', 'refresh_token');
-  params.append('refresh_token', tokenRequest.refreshToken);  // The refresh token
-  params.append('redirect_uri', tokenRequest.redirectUri);
-  params.append('scope', tokenRequest.scopes.join(" "));  // Space-separated list of scopes
-
-  axios.post(tokenEndpoint, params, {
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    }
-  }).then((response) => {
-    // Save the new access token in session (or wherever needed)
-    req.session.accessToken = response.data.access_token;
-    console.log('Access token refreshed:', response.data.access_token);
-  }).catch((error) => {
-    console.error('Error refreshing access token:', error.response.data);
-    return res.redirect('/login');
-  });
-  const authCodeUrlParameters = {
-    scopes: ["user.read", "mail.readwrite", "mail.send", "mail.read"],
-    redirectUri: `${redirectHost}/auth/callback`,
-  };
-
-  msalClient.getAuthCodeUrl(authCodeUrlParameters).then((response) => {
-    res.redirect(response);
-  }).catch((error) => console.log(JSON.stringify(error)));
-});
-
 // Login Route
 app.get('/login', (req, res) => {
   const authCodeUrlParameters = {
@@ -138,7 +68,7 @@ app.get('/login', (req, res) => {
 });
 
 // Auth callback route
-app.get('/auth/callback', (req, res) => {
+app.get('/auth/callback', async(req, res) => {
   const tokenRequest = {
     code: req.query.code,  // Authorization code received from /authorize
     clientId: process.env.CLIENT_ID,
@@ -165,7 +95,8 @@ app.get('/auth/callback', (req, res) => {
     // Save the tokens in session (or wherever needed)
     req.session.accessToken = response.data.access_token;
     req.session.refreshToken = response.data.refresh_token;
-    res.redirect('/emails');
+    // createSubscription(req);
+    res.redirect('/emails'); 
   }).catch((error) => {
     console.log('Error during token exchange:', error.response.data);
     res.status(500).send(error.response.data);
@@ -185,16 +116,24 @@ app.post('/webhook', (req, res) => {
 
 // Get emails
 app.get('/emails', async (req, res) => {
-  if (!req.session.accessToken) {
+  if(req.session.refreshToken) {
+    req.session.accessToken = await getAccessTokenForRefreshToken(req.session.refreshToken);
+      if(!req.session.accessToken) {
+        return res.redirect('/login');
+      }
+  }
+  else {
     return res.redirect('/login');
   }
   const showGrouped = req.query.showGrouped || 'false';
+  const numberOfDaysSince = req.query.numberOfDaysSince || 100;
   const client = getAuthenticatedClient(req.session.accessToken);
   try {
     let messages = [];
     const queryOptions = {
       '$select': 'id,subject,body,bodyPreview,conversationId,conversationIndex,internetMessageHeaders,receivedDateTime,from,toRecipients',
       '$expand': 'attachments',
+      '$filter' : `receivedDateTime ge ${new Date(new Date().setDate(new Date().getDate() - numberOfDaysSince)).toISOString()}`,
       '$top': 25 // Limit the number of messages to fetch
     };
     let nextPageUrl = `/me/mailFolders/inbox/messages?${new URLSearchParams(queryOptions).toString()}`;
@@ -251,9 +190,6 @@ app.get('/emails', async (req, res) => {
         }
         groupedMessages[threadId].push(value.msg);
       });
-      // console.log(`pre-process-dict`);
-      // const filePath1 = path.join(__dirname, `email-${req.session.username}.json`);
-      // fs.writeFileSync(filePath1, JSON.stringify(groupedMessages));
       res.render('grouped-email', { groupedMessages: groupedMessages });
       return;
     }
@@ -333,7 +269,7 @@ app.post('/extend-subs', async (req, res) => {
     console.log(`subscriptions are ${JSON.stringify(messages)}`);
 
     for (let message of messages) {
-      const newExpirationDateTime = new Date(Date.now() + 3600 * 1000).toISOString();
+      const newExpirationDateTime = new Date(Date.now() + 4230 * 60 * 1000).toISOString();
       try {
         const updatedSubscription = await client.api(`/subscriptions/${message.id}`)
           .patch({
