@@ -34,6 +34,7 @@ const createSubscription = async (req) => {
     const subscription = {
       changeType: "created,updated",
       notificationUrl: `EventHub:https://${eventhubnamespace}.servicebus.windows.net/eventhubname/${eventhubname}?tenantId=${domainname}`,
+      lifecycleNotificationUrl: `EventHub:https://${eventhubnamespace}.servicebus.windows.net/eventhubname/${eventhubname}?tenantId=${domainname}`,
       resource: "me/messages",
       expirationDateTime: new Date(Date.now() + 4230 * 60 * 1000).toISOString(), // 3 days from now.
       clientState: `${emailAddress}`
@@ -45,6 +46,34 @@ const createSubscription = async (req) => {
     console.error('Error creating subscription:', error.response.data);
   }
 };
+
+app.post('/renew-subscription', async (req, res) => {
+  const events = req.body.value;
+    if (events === undefined){
+      console.log("Received empty body");
+      res.send(req.query.validationToken);  // Respond with the validation token
+    } else {
+      console.log("received event", events);
+      for (let ev of events) {
+        if (ev.lifecycleEvent ==="reauthorizationRequired") {
+          console.log("Received reauthorizationRequired event for subscription:", ev.subscriptionId);
+          const response = axios.patch(
+              `https://graph.microsoft.com/v1.0/subscriptions/${ev.subscriptionId}`,
+              {
+                  expirationDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+              },
+              {
+                  headers: {
+                      Authorization: `Bearer ${req.session.accessToken}`,
+                      'Content-Type': 'application/json'
+                  }
+              }
+            )
+          console.log("Reauthorization required, extending subscription expiration time by 1 day", response.data);
+        }
+      }
+    }
+});
 
 // Session setup
 app.use(session({
@@ -59,7 +88,7 @@ app.set('view engine', 'ejs');
 app.get('/login', (req, res) => {
   const authCodeUrlParameters = {
     scopes: ["user.read", "mail.readwrite", "mail.send", "mail.read"],
-    redirectUri: `${redirectHost}/auth/callback`,
+    redirectUri: `${redirectHost}/outlook-integration/auth/callback`,
   };
 
   msalClient.getAuthCodeUrl(authCodeUrlParameters).then((response) => {
@@ -68,12 +97,12 @@ app.get('/login', (req, res) => {
 });
 
 // Auth callback route
-app.get('/auth/callback', async(req, res) => {
+app.get('/outlook-integration/auth/callback', async(req, res) => {
   const tokenRequest = {
     code: req.query.code,  // Authorization code received from /authorize
     clientId: process.env.CLIENT_ID,
     clientSecret: process.env.CLIENT_SECRET,
-    redirectUri: `${redirectHost}/auth/callback`,  // Must match the one registered in Azure
+    redirectUri: `${redirectHost}/outlook-integration/auth/callback`,  // Must match the one registered in Azure
     scopes: ["user.read", "mail.readwrite", "offline_access"],  // Requested scopes
   };
 
@@ -91,15 +120,16 @@ app.get('/auth/callback', async(req, res) => {
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     }
-  }).then((response) => {
+  }).then(async (response) => {
     // Save the tokens in session (or wherever needed)
     req.session.accessToken = response.data.access_token;
     req.session.refreshToken = response.data.refresh_token;
-    // createSubscription(req);
+    console.log(`refreshToken is ${req.session.refreshToken}`);
+    await createSubscription(req);
     res.redirect('/emails'); 
   }).catch((error) => {
-    console.log('Error during token exchange:', error.response.data);
-    res.status(500).send(error.response.data);
+    console.log('Error during token exchange:', error);
+    res.status(500).send(error);
   });
 });
 app.post('/webhook', (req, res) => {
