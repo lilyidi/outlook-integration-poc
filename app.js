@@ -269,8 +269,10 @@ app.post('/send', async (req, res) => {
   };
 
   const client = getAuthenticatedClient(req.session.accessToken);
-  // const draft = await client.api('/me/messages').post(mail.message);
-  // const messageId = draft.id;
+
+  const draftResponse = await client.api("/me/messages/AQMkADAwATY0MDABLTQ3OTQtZWJkMy0wMAItMDAKAEYAAAMEx9FjT3P0SbDNJcxKIVGyBwAYNk85euZ7RKKsocScIeKlAAACAQwAAAAYNk85euZ7RKKsocScIeKlAAAAFstGmQAAAA==/createReply")
+  .post({});
+  const messageId = draftResponse.id;
 
   if (uploadedFile) {
     const filePath = uploadedFile.path;
@@ -282,58 +284,60 @@ app.post('/send', async (req, res) => {
     const fileContent = fs.readFileSync(filePath);
     const fileSize = fileContent.length;
 
-    if (uploadedFile.size > 4 * 1024 * 1024) {
-      const uploadSession = await client
-        .api(`/me/messages/${messageId}/attachments/createUploadSession`)
-        .post({
-          AttachmentItem: {
-            attachmentType: "file",
-            name: fileName,
-            size: fs.statSync(filePath).size,
-          },
+    if (uploadedFile.size > 3 * 1024 * 1024) {
+        const uploadSession = await client.api(`/me/messages/${messageId}/attachments/createUploadSession`).post({
+            AttachmentItem: {
+                attachmentType: "file",
+                name: fileName,
+                size: fileSize,
+                contentType: uploadedFile.mimeType,
+            },
         });
         const uploadUrl = uploadSession.uploadUrl;
-        const chunkSize = 327680; // 320 KB
-        let start = 0;
+        let bytesUploaded = 0;
+        const readStream = fs.createReadStream(uploadedFile.path);
 
-        while (start < fileSize) {
-          const end = Math.min(start + chunkSize, fileSize);
-          const chunk = fileContent.slice(start, end);
+        for await (const chunk of readStream) {
+          console.log(`Uploading ${chunk.length} bytes...`);
+          const start = bytesUploaded;
+          const end = Math.min(start + chunk.length-1, fileSize-1);
 
-          await axios.put(uploadUrl, chunk, {
-            headers: {
-              "Content-Range": `bytes ${start}-${end - 1}/${fileSize}`,
-            },
-          });
+          try {
+            const response = await axios.put(uploadUrl, chunk, {
+                headers: {
+                    "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": chunk.length,
+                },
+            });
+            console.log(response.data);
+          } catch (error) {
+            console.log(error.response.data);
+          }
 
-          start = end;
+          bytesUploaded += chunk.length;
         }
+        console.log("Upload complete.");
     } else {
-      // await client.api(`/me/messages/${messageId}/attachments`).post({
-      //   "@odata.type": "#microsoft.graph.fileAttachment",
-      //   name: fileName,
-      //   contentBytes: fileContent.toString("base64"), // Convert to Base64
-      // })
-      const draftResponse = await client.api("/me/messages/AQMkADAwATY0MDABLTQ3OTQtZWJkMy0wMAItMDAKAEYAAAMEx9FjT3P0SbDNJcxKIVGyBwAYNk85euZ7RKKsocScIeKlAAACAQwAAAAYNk85euZ7RKKsocScIeKlAAAAFstGmQAAAA==/createReply")
-      .post({});
-      await client.api(`/me/messages/${encodeURIComponent(draftResponse.id)}`).update(mail.message);
-      await client.api(`/me/messages/${draftResponse.id}/attachments`).post([{
+      console.log("adding file to email");
+      await client.api(`/me/messages/${encodeURIComponent(messageId)}`).update(mail.message);
+      await client.api(`/me/messages/${messageId}/attachments`).post([{
         "@odata.type": "#microsoft.graph.fileAttachment",
         name: fileName,
         contentBytes: fileContent.toString("base64"),
         contentType: uploadedFile.mimeType,
       }]);
-      await client.api(`/me/messages/${draftResponse.id}/send`).post({})
-      .then(response => {
-        // Delete file after sending
-        fs.unlinkSync(filePath);
-        res.redirect('/emails');
-      }).catch(error => {
-        console.log(error);
-        res.status(500).send(error);
-      });
-
     }
+    console.log('Sending email');
+    await client.api(`/me/messages/${messageId}/send`).post({})
+    .then(response => {
+      // Delete file after sending
+      fs.unlinkSync(filePath);
+      res.redirect('/emails');
+    }).catch(error => {
+      console.log(error);
+      res.status(500).send(error);
+    });
   }
 });
 

@@ -8,9 +8,6 @@
       <% email.attachments.forEach(attachment => { %>
         <li><strong><%= attachment.name %></strong></li>
         <p><%= attachment.contentType %>, <%= attachment.size %></p>
-        <% if(attachment.contentType.startsWith('text')) { %>
-          <p><%= Buffer.from(attachment.contentBytes, 'base64').toString('utf8') %></p>
-        <% } %>
       <% }) %>
     <% }) %>
   <% } %> <!-- Close the if block -->
