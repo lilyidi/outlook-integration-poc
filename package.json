@@ -11,19 +11,21 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@azure/event-hubs": "^5.11.0",
+    "@azure/msal-node": "^1.0.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "axios": "^1.7.7",
+    "body-parser": "^1.20.3",
     "dotenv": "^16.0.0",
     "ejs": "^3.1.10",
-    "express": "^4.21.0",
-    "express-session" : "1.18.0",
-    "@azure/msal-node": "^1.0.0",
-    "@azure/event-hubs": "^5.11.0",
-    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "express": "^4.21.1",
+    "express-session": "1.18.0",
+    "fs": "^0.0.1-security",
     "isomorphic-fetch": "^3.0.0",
+    "mailparser": "^3.7.1",
+    "multer": "^1.4.5-lts.1",
     "passport": "^0.7.0",
-    "body-parser" : "^1.20.3",
-    "passport-azure-ad": "^4.3.5",
-    "mailparser" : "^3.7.1"
+    "passport-azure-ad": "^4.3.5"
   },
   "engines": {
     "node": "18.x"

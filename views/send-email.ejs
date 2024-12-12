@@ -1,11 +1,22 @@
-<ul>
-    <% if(subscriptions && subscriptions.length > 0) { %>
-      <strong>Webhook Subscriptions</strong>
-      <% subscriptions.forEach(sub => { %>
-        <li><strong><%= sub.id %></strong> <strong><%= new Date(sub.expirationDateTime).toLocaleString() %></strong></li>
-      <% }) %>
-    <% } %> <!-- Close the if block -->
-  </ul> <!-- Close the ul -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Send Email</title>
+</head>
+<body>
+  <h1>Send Email with Uploaded File</h1>
+  <form action="/send-email" method="POST">
+    <input type="hidden" name="filePath" value="<%= filePath %>">
+    <label for="recipientEmail">Recipient Email:</label>
+    <input type="email" id="recipientEmail" name="recipientEmail" required>
+    <br><br>
+    <button type="submit">Send Email</button>
+  </form>
+</body>
+</html>
+
 
   <form action="/list-subs" method="POST">
     <button type="submit">List Subs</button>
@@ -18,7 +29,7 @@
   <form action="/emails" method="GET">
     <button type="submit">Show Emails</button>
   </form>
-
+  
   <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
     <input type="file" name="file" required />
     <button type="submit">Upload</button>
@@ -28,4 +39,4 @@
   <form id="sendForm" action="/send" method="POST">
     <input type="text" name="fileName" placeholder="Enter uploaded file name" required />
     <button type="submit">Send</button>
-  </form>
+  </form>  

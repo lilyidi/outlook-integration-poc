@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require("multer");
 const session = require('express-session');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -13,6 +14,10 @@ const {getAccessTokenForRefreshToken, msalConfig, redirect_Host, getAuthenticate
 const app = express();
 app.use(bodyParser.json());
 const port = 3000;
+
+// Configure multer for file uploads
+const upload = multer({ dest: './uploads' }); // Temp directory
+let uploadedFile = null; // Temporary variable to store uploaded file info
 
 const config = msalConfig;
 const redirectHost = redirect_Host
@@ -125,7 +130,7 @@ app.get('/outlook-integration/auth/callback', async(req, res) => {
     req.session.accessToken = response.data.access_token;
     req.session.refreshToken = response.data.refresh_token;
     console.log(`refreshToken is ${req.session.refreshToken}`);
-    await createSubscription(req);
+    // await createSubscription(req);
     res.redirect('/emails'); 
   }).catch((error) => {
     console.log('Error during token exchange:', error);
@@ -164,7 +169,7 @@ app.get('/emails', async (req, res) => {
       '$select': 'id,subject,body,bodyPreview,conversationId,conversationIndex,internetMessageHeaders,receivedDateTime,from,toRecipients',
       '$expand': 'attachments',
       '$filter' : `receivedDateTime ge ${new Date(new Date().setDate(new Date().getDate() - numberOfDaysSince)).toISOString()}`,
-      '$top': 25 // Limit the number of messages to fetch
+      '$top': 5 // Limit the number of messages to fetch
     };
     let nextPageUrl = `/me/mailFolders/inbox/messages?${new URLSearchParams(queryOptions).toString()}`;
     while (nextPageUrl) {
@@ -230,9 +235,18 @@ app.get('/emails', async (req, res) => {
   }
 });
 
+app.post('/upload', upload.single('file'), async (req, res) => { 
+  if (!req.file) {
+    return res.status(400).send("No file uploaded.");
+  }
+
+  // Store the uploaded file info
+  uploadedFile = req.file;
+  res.status(200).send(`File uploaded: ${req.file.originalname}`);
+});
 
 // Send email
-app.post('/send-email', (req, res) => {
+app.post('/send', async (req, res) => {
   if (!req.session.accessToken) {
     return res.redirect('/login');
   }
@@ -246,20 +260,81 @@ app.post('/send-email', (req, res) => {
       toRecipients: [
         {
           emailAddress: {
-            address: 'periyv-triage-test-aaaan4kkn7epczwe7a6n4tblxu@regalvoice.slack.com'
+            address: 'lily@regalvoice.com'
           }
         }
-      ]
-    },
-    saveToSentItems: "true"
+      ],
+      attachments: [],
+    }
   };
-  const client = getAuthenticatedClient(req.session.accessToken)
-  client.api('/me/sendMail').post(mail).then(response => {
-    res.redirect('/emails');
-  }).catch(error => {
-    console.log(error);
-    res.status(500).send(error);
-  });
+
+  const client = getAuthenticatedClient(req.session.accessToken);
+  // const draft = await client.api('/me/messages').post(mail.message);
+  // const messageId = draft.id;
+
+  if (uploadedFile) {
+    const filePath = uploadedFile.path;
+    const fileName = uploadedFile.originalname;
+    if (!fs.existsSync(filePath)) {
+      return res.status(400).send("File not found.");
+    }
+    // Read the file for attachment
+    const fileContent = fs.readFileSync(filePath);
+    const fileSize = fileContent.length;
+
+    if (uploadedFile.size > 4 * 1024 * 1024) {
+      const uploadSession = await client
+        .api(`/me/messages/${messageId}/attachments/createUploadSession`)
+        .post({
+          AttachmentItem: {
+            attachmentType: "file",
+            name: fileName,
+            size: fs.statSync(filePath).size,
+          },
+        });
+        const uploadUrl = uploadSession.uploadUrl;
+        const chunkSize = 327680; // 320 KB
+        let start = 0;
+
+        while (start < fileSize) {
+          const end = Math.min(start + chunkSize, fileSize);
+          const chunk = fileContent.slice(start, end);
+
+          await axios.put(uploadUrl, chunk, {
+            headers: {
+              "Content-Range": `bytes ${start}-${end - 1}/${fileSize}`,
+            },
+          });
+
+          start = end;
+        }
+    } else {
+      // await client.api(`/me/messages/${messageId}/attachments`).post({
+      //   "@odata.type": "#microsoft.graph.fileAttachment",
+      //   name: fileName,
+      //   contentBytes: fileContent.toString("base64"), // Convert to Base64
+      // })
+      const draftResponse = await client.api("/me/messages/AQMkADAwATY0MDABLTQ3OTQtZWJkMy0wMAItMDAKAEYAAAMEx9FjT3P0SbDNJcxKIVGyBwAYNk85euZ7RKKsocScIeKlAAACAQwAAAAYNk85euZ7RKKsocScIeKlAAAAFstGmQAAAA==/createReply")
+      .post({});
+      await client.api(`/me/messages/${encodeURIComponent(draftResponse.id)}`).update(mail.message);
+      await client.api(`/me/messages/${draftResponse.id}/attachments`).post([{
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        name: fileName,
+        contentBytes: fileContent.toString("base64"),
+        contentType: uploadedFile.mimeType,
+      }]);
+      await client.api(`/me/messages/${draftResponse.id}/send`).post({})
+      .then(response => {
+        // Delete file after sending
+        fs.unlinkSync(filePath);
+        res.redirect('/emails');
+      }).catch(error => {
+        console.log(error);
+        res.status(500).send(error);
+      });
+
+    }
+  }
 });
 
 app.post('/list-subs', async (req, res) => {

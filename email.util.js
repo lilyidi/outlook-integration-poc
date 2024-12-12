@@ -13,8 +13,9 @@ const getEmailById = async (emailId, refreshToken) => {
     try {
         const accessToken = await getAccessTokenForRefreshToken(refreshToken)
         if(accessToken) {
+            console.log("attempting to get email with id: ", emailId);
             const client = getAuthenticatedClient(accessToken);
-            const emailEndpoint = `https://graph.microsoft.com/v1.0/me/messages/${emailId}`;
+            const emailEndpoint = `https://graph.microsoft.com/v1.0/me/messages/${emailId}?$select=id,subject,body,bodyPreview,conversationId,conversationIndex,internetMessageHeaders,internetMessageId,receivedDateTime,from,toRecipients,ccRecipients,bccRecipients&$expand=attachments`;
             const response = await client.api(emailEndpoint).get();
             return response;
         }
